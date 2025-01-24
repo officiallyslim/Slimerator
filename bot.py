@@ -1,102 +1,131 @@
-import discord
-from discord.ext import commands
-import random
-import string
 from dotenv import load_dotenv
-import os
-
-# Load the environment variables from .env file
 load_dotenv()
-TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+from keep_alive import keep_alive
+import discord
+from discord import app_commands
+from discord.ext import commands
+import os
+import random
 
-intents = discord.Intents.default()
-intents.messages = True
-intents.guilds = True
+# Enable all intents for the bot
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='/', intents=intents)
 
-bot = commands.Bot(command_prefix='.', intents=intents)
-
-# Dictionary to store generated keys and premium statuses
-keys = {}
+# Variables to store channel settings and premium users
+welcome_channel = None
+leave_channel = None
+log_channel = None
 premium_users = {}
+premium_role = None
+command_roles = {}
 
-# Command to setup key generation channels
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setup(ctx):
-    await ctx.send("What channels would you like keys generated in? Please mention the channel(s).")
+# Bot Ready Event
+@bot.event
+async def on_ready():
+    await bot.tree.sync()  # Sync slash commands
+    print(f'Logged in as {bot.user}')
+    print('Slash commands have been synced.')
 
-    def check(m):
-        return m.author == ctx.author and m.channel == ctx.channel
+# Setup command to configure channels
+@bot.tree.command(name="setup", description="Set up channels for welcome, leave, or logging.")
+@app_commands.describe(option="Choose between welcome, leave, or log", channel="The channel to set")
+async def setup(interaction: discord.Interaction, option: str, channel: discord.TextChannel):
+    global welcome_channel, leave_channel, log_channel
+    if option.lower() == "welcome":
+        welcome_channel = channel.id
+        await interaction.response.send_message(f"Welcome channel set to {channel.mention}")
+    elif option.lower() == "leave":
+        leave_channel = channel.id
+        await interaction.response.send_message(f"Leave channel set to {channel.mention}")
+    elif option.lower() == "log":
+        log_channel = channel.id
+        await interaction.response.send_message(f"Log channel set to {channel.mention}")
+    else:
+        await interaction.response.send_message("Invalid option. Use 'welcome', 'leave', or 'log'.")
 
-    try:
-        msg = await bot.wait_for('message', check=check, timeout=60.0)
-        channels = msg.channel_mentions
-        if not channels:
-            await ctx.send("No channels mentioned. Please mention at least one channel.")
-            return
-        for channel in channels:
-            keys[channel.id] = []
-        await ctx.send(f"Channels set for key generation: {', '.join([channel.mention for channel in channels])}")
-    except TimeoutError:
-        await ctx.send("Setup timed out. Please try again.")
+# Ban command
+@bot.tree.command(name="ban", description="Ban a user for a specified duration.")
+@app_commands.describe(member="The user to ban", duration="Duration of the ban")
+async def ban(interaction: discord.Interaction, member: discord.Member, duration: str):
+    await interaction.response.send_message(f"{member.mention} has been banned for {duration}")
 
-# Command to generate keys
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def generate_key(ctx, amount: int):
-    if ctx.channel.id not in keys:
-        await ctx.send("This channel is not set for key generation. Please use /setup first.")
-        return
-    generated_keys = []
-    for _ in range(amount):
-        key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
-        generated_keys.append(key)
-        keys[ctx.channel.id].append(key)
-    await ctx.send(f"Generated keys: {', '.join(generated_keys)}")
+# Kick command
+@bot.tree.command(name="kick", description="Kick a user from the server.")
+@app_commands.describe(member="The user to kick")
+async def kick(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.send_message(f"{member.mention} has been kicked")
 
-# Command to give premium status
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def P(ctx, member: discord.Member, duration: str = None):
-    premium_users[member.id] = 'premium'
-    await ctx.send(f"{member.mention} has been given premium status.")
+# Timeout command
+@bot.tree.command(name="timeout", description="Timeout a user for a specified duration.")
+@app_commands.describe(member="The user to timeout", duration="Duration of the timeout")
+async def timeout(interaction: discord.Interaction, member: discord.Member, duration: str):
+    await interaction.response.send_message(f"{member.mention} has been timed out for {duration}")
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def P_plus(ctx, member: discord.Member, duration: str = None):
-    premium_users[member.id] = 'premium+'
-    await ctx.send(f"{member.mention} has been given premium+ status.")
+# User Lookup command
+@bot.tree.command(name="user_lookup", description="Get information about a user.")
+@app_commands.describe(user="The user to look up")
+async def user_lookup(interaction: discord.Interaction, user: discord.User):
+    embed = discord.Embed(title=f"User Info: {user.name}", color=discord.Color.blue())
+    embed.set_thumbnail(url=user.avatar.url if user.avatar else user.default_avatar.url)
+    embed.add_field(name="User ID", value=user.id, inline=True)
+    embed.add_field(name="Created At", value=user.created_at.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+    await interaction.response.send_message(embed=embed)
 
-# Command to check the bot's response time
-@bot.command()
-async def ping(ctx):
-    await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
+# Generate premium access key
+@bot.tree.command(name="generate", description="Generate a premium access key.")
+async def generate(interaction: discord.Interaction):
+    key = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=random.randint(6, 18)))
+    await interaction.response.send_message(f"Your access key: `{key}`", ephemeral=True)
 
-# Command to check who invited the user and their invites
-@bot.command()
-async def Inv_Req(ctx):
-    # Implement logic to track invites and return information
-    await ctx.send("This feature is under development.")
+# Premium management commands
+@bot.tree.command(name="premium", description="Grant premium access to a user.")
+@app_commands.describe(user="The user to grant premium")
+async def premium(interaction: discord.Interaction, user: discord.Member):
+    premium_users[user.id] = True
+    await interaction.response.send_message(f"{user.mention} is now a premium user!")
 
-# Command to claim a key
-@bot.command()
-async def Key_Claim(ctx, key: str):
-    for channel_id, channel_keys in keys.items():
-        if key in channel_keys:
-            keys[channel_id].remove(key)
-            await ctx.send(f"Key {key} claimed successfully!")
-            return
-    await ctx.send("Invalid key.")
+@bot.tree.command(name="premium_delete", description="Remove premium access from a user.")
+@app_commands.describe(user="The user to remove premium from")
+async def premium_delete(interaction: discord.Interaction, user: discord.Member):
+    premium_users.pop(user.id, None)
+    await interaction.response.send_message(f"Premium removed from {user.mention}")
 
-# Command to generate free code keys
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def Code_Key_Gen(ctx, amount: int):
-    generated_keys = []
-    for _ in range(amount):
-        key = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
-        generated_keys.append(key)
-    await ctx.send(f"Generated free code keys: {', '.join(generated_keys)}")
+@bot.tree.command(name="premium_role", description="Set the premium role.")
+@app_commands.describe(role="The role to assign to premium users")
+async def premium_role_command(interaction: discord.Interaction, role: discord.Role):
+    global premium_role
+    premium_role = role.id
+    await interaction.response.send_message(f"Premium role set to {role.name}")
 
-# Run the bot with your token
-bot.run(MTMzMTg1ODg2Nzg4NTE3ODk0MA.GuxwUY.s8cMQadmJ1lzax7dHUA5WdgMf3NWzDPkXJ3rqA)
+@bot.tree.command(name="premium_list", description="List all premium users.")
+async def premium_list(interaction: discord.Interaction):
+    if premium_users:
+        user_list = "\n".join([f"<@{user_id}>" for user_id in premium_users.keys()])
+        await interaction.response.send_message(f"Premium users:\n{user_list}")
+    else:
+        await interaction.response.send_message("No premium users.")
+
+# Role-linking for commands
+@bot.tree.command(name="set", description="Set required role for a command.")
+@app_commands.describe(role="The role required", command="The command to set role for")
+async def set_command(interaction: discord.Interaction, role: discord.Role, command: str):
+    command_roles[command] = role.id
+    await interaction.response.send_message(f"Command `{command}` now requires `{role.name}` role.")
+
+# Slash command to list all available commands
+@bot.tree.command(name="commands", description="List all available bot commands.")
+async def commands_list(interaction: discord.Interaction):
+    command_names = [command.name for command in bot.tree.walk_commands()]
+    command_list = "\n".join([f"/{cmd}" for cmd in command_names])
+    embed = discord.Embed(title="Available Commands", description=command_list, color=discord.Color.green())
+    await interaction.response.send_message(embed=embed)
+
+# Keep bot alive (for Replit hosting)
+keep_alive()
+
+# Run the bot using the token from environment variables
+TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("Error: DISCORD_BOT_TOKEN not found. Please set it in the environment variables.")
